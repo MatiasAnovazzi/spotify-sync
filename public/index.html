@@ -271,7 +271,7 @@
     // --- CARGAR PERFIL DE SPOTIFY ---
     async function fetchUserProfile() {
       try {
-        const res = await fetch('https://open.spotify.com/home', {
+        const res = await fetch('https://api.spotify.com/v1/me', {
           headers: { 'Authorization': `Bearer ${accessToken}` }
         });
         if (res.ok) {
