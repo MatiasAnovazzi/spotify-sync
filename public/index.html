@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spotify Sync Party</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #121212;
+      color: #FFFFFF;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+    .card {
+      background-color: #181818;
+      border-radius: 12px;
+      padding: 30px;
+      width: 360px;
+      text-align: center;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    h1 { color: #1DB954; font-size: 24px; margin-bottom: 20px; }
+    button {
+      background-color: #1DB954;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 50px;
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 14px;
+      margin: 8px 4px;
+      transition: background 0.2s;
+    }
+    button:hover { background-color: #1ed760; }
+    button:disabled { background-color: #535353; cursor: not-allowed; }
+    input {
+      background-color: #282828;
+      border: 1px solid #3e3e3e;
+      color: white;
+      padding: 10px;
+      border-radius: 6px;
+      width: 80%;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .hidden { display: none; }
+    .status { margin-top: 15px; font-size: 13px; color: #b3b3b3; }
+    .controls { margin-top: 20px; }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h1>Spotify Sync</h1>
+
+    <!-- Paso 1: Login -->
+    <div id="login-section">
+      <p>Inicia sesión con tu cuenta de Spotify Premium para comenzar.</p>
+      <button id="btn-login">Conectar Spotify</button>
+    </div>
+
+    <!-- Paso 2: Unirse a Sala -->
+    <div id="room-section" class="hidden">
+      <input type="text" id="room-input" placeholder="Código de Sala (ej. sala123)">
+      <br>
+      <button id="btn-join">Unirse a la Sala</button>
+    </div>
+
+    <!-- Paso 3: Panel de Control -->
+    <div id="player-section" class="hidden">
+      <h3>Sala: <span id="current-room-text" style="color:#1DB954;"></span></h3>
+      <div class="controls">
+        <button id="btn-play">▶ Reproducir</button>
+        <button id="btn-pause">⏸ Pausar</button>
+      </div>
+      <p class="status" id="status-text">Listo para sincronizar.</p>
+    </div>
+  </div>
+
+  <script>
+    // Configuración de Spotify (Reemplaza con tu Client ID)
+    const CLIENT_ID = 'ec678b77a69f45aebc0f6543e900ff3c';
+    const REDIRECT_URI = 'http://127.0.0.1:3000/';
+    const SCOPES = 'user-modify-playback-state user-read-playback-state';
+
+    const socket = io();
+    let accessToken = null;
+    let currentRoom = null;
+
+    // Elementos del DOM
+    const loginSec = document.getElementById('login-section');
+    const roomSec = document.getElementById('room-section');
+    const playerSec = document.getElementById('player-section');
+    const roomInput = document.getElementById('room-input');
+    const statusText = document.getElementById('status-text');
+
+    // --- FLUJO PKCE DE AUTENTICACIÓN ---
+
+    function generateRandomString(length) {
+      const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      const values = crypto.getRandomValues(new Uint8Array(length));
+      return values.reduce((acc, x) => acc + possible[x % possible.length], "");
+    }
+
+    async function sha256(plain) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(plain);
+      return window.crypto.subtle.digest('SHA-256', data);
+    }
+
+    function base64encode(input) {
+      return btoa(String.fromCharCode.apply(null, new Uint8Array(input)))
+        .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+    }
+
+    async function redirectToSpotifyAuth() {
+      const codeVerifier = generateRandomString(64);
+      const hashed = await sha256(codeVerifier);
+      const codeChallenge = base64encode(hashed);
+
+      window.localStorage.setItem('code_verifier', codeVerifier);
+
+      const params = new URLSearchParams({
+        response_type: 'code',
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+        code_challenge_method: 'S256',
+        code_challenge: codeChallenge,
+        redirect_uri: REDIRECT_URI,
+      });
+
+      window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
+    }
+
+    async function getAccessToken(code) {
+      const codeVerifier = localStorage.getItem('code_verifier');
+
+      const response = await fetch('https://accounts.spotify.com/api/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: CLIENT_ID,
+          grant_type: 'authorization_code',
+          code: code,
+          redirect_uri: REDIRECT_URI,
+          code_verifier: codeVerifier,
+        }),
+      });
+
+      const data = await response.json();
+      return data.access_token;
+    }
+
+    // --- MANEJO DE INICIO Y CALLBACK ---
+
+    window.addEventListener('load', async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const code = urlParams.get('code');
+
+      if (code) {
+        statusText.innerText = "Obteniendo token de Spotify...";
+        accessToken = await getAccessToken(code);
+        // Limpiar URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+        showRoomSection();
+      }
+    });
+
+    document.getElementById('btn-login').addEventListener('click', redirectToSpotifyAuth);
+
+    function showRoomSection() {
+      loginSec.classList.add('hidden');
+      roomSec.classList.remove('hidden');
+    }
+
+    // --- SALAS Y WEBSOCKETS ---
+
+    document.getElementById('btn-join').addEventListener('click', () => {
+      const roomId = roomInput.value.trim();
+      if (!roomId) return alert("Ingresa un código de sala");
+
+      currentRoom = roomId;
+      socket.emit('join_room', roomId);
+
+      document.getElementById('current-room-text').innerText = roomId;
+      roomSec.classList.add('hidden');
+      playerSec.classList.remove('hidden');
+    });
+
+    // --- SPOTIFY PLAYER API CALLS ---
+
+    async function spotifyApiCall(endpoint, method = 'GET', body = null) {
+      if (!accessToken) return;
+      const options = {
+        method,
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      };
+      if (body) options.body = JSON.stringify(body);
+
+      const res = await fetch(`https://api.spotify.com/v1/me/player${endpoint}`, options);
+      if (res.status === 403) {
+        statusText.innerText = "Error 403: Se requiere cuenta Spotify Premium.";
+      }
+      return res;
+    }
+
+    async function getCurrentState() {
+      const res = await spotifyApiCall('');
+      if (res && res.status === 200) {
+        return await res.json();
+      }
+      return null;
+    }
+
+    // --- CONTROL LOCAL Y EMISIÓN ---
+
+    document.getElementById('btn-play').addEventListener('click', async () => {
+      // 1. Obtener estado local para saber qué canción suena y posición
+      const state = await getCurrentState();
+      
+      let payload = { action: 'play' };
+      if (state && state.item) {
+        payload.trackUri = state.item.uri;
+        payload.positionMs = state.progress_ms;
+      }
+
+      // 2. Ejecutar localmente
+      await spotifyApiCall('/play', 'PUT', payload.trackUri ? { uris: [payload.trackUri], position_ms: payload.positionMs } : null);
+      statusText.innerText = "Reproduciendo...";
+
+      // 3. Emitir a la sala
+      socket.emit('sync_action', payload);
+    });
+
+    document.getElementById('btn-pause').addEventListener('click', async () => {
+      await spotifyApiCall('/pause', 'PUT');
+      statusText.innerText = "Pausado.";
+      socket.emit('sync_action', { action: 'pause' });
+    });
+
+    // --- RECEPCIÓN Y EJECUCIÓN REMOTA ---
+
+    socket.on('apply_action', async (data) => {
+      console.log('Acción recibida desde el servidor:', data);
+
+      if (data.action === 'play') {
+        statusText.innerText = "Sincronizando: Reproduciendo...";
+        const body = {};
+        if (data.trackUri) body.uris = [data.trackUri];
+        if (typeof data.positionMs === 'number') body.position_ms = data.positionMs;
+
+        await spotifyApiCall('/play', 'PUT', Object.keys(body).length ? body : null);
+      } 
+      else if (data.action === 'pause') {
+        statusText.innerText = "Sincronizando: Pausado por otro usuario.";
+        await spotifyApiCall('/pause', 'PUT');
+      }
+    });
+  </script>
+</body>
+</html>
