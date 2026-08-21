@@ -7,30 +7,47 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Servir archivos estáticos de la carpeta "public"
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Gestión de conexiones WebSockets
 io.on('connection', (socket) => {
-  console.log(`Usuario conectado: ${socket.id}`);
-
-  // Unirse a una sala
-  socket.on('join_room', (roomId) => {
+  // Unirse a una sala con nombre de usuario
+  socket.on('join_room', ({ roomId, userName }) => {
     socket.join(roomId);
     socket.roomId = roomId;
-    console.log(`Socket ${socket.id} se unió a la sala: ${roomId}`);
+    socket.userName = userName || 'Usuario Anónimo';
+
+    console.log(`[${socket.roomId}] ${socket.userName} conectado (${socket.id})`);
+
+    // Notificar a todos en la sala que alguien entró
+    io.to(socket.roomId).emit('user_joined', {
+      user: socket.userName,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    });
   });
 
-  // Retransmitir acciones de reproducción a todos los demás en la sala
+  // Retransmitir acciones de reproducción
   socket.on('sync_action', (data) => {
     if (socket.roomId) {
-      // socket.to(roomId) envía a todos EN LA SALA excepto al remitente
-      socket.to(socket.roomId).emit('apply_action', data);
+      const payload = {
+        ...data,
+        user: socket.userName || 'Alguien',
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      };
+      
+      // Enviar a todos los demás en la sala
+      socket.to(socket.roomId).emit('apply_action', payload);
+      // Enviar el evento de log a TODOS (incluyendo el emisor)
+      io.to(socket.roomId).emit('log_action', payload);
     }
   });
 
   socket.on('disconnect', () => {
-    console.log(`Usuario desconectado: ${socket.id}`);
+    if (socket.roomId && socket.userName) {
+      io.to(socket.roomId).emit('user_left', {
+        user: socket.userName,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+    }
   });
 });
 
