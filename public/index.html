@@ -40,6 +40,19 @@
     button:hover { background-color: #1ed760; transform: scale(1.03); }
     button:active { transform: scale(0.98); }
     button:disabled { background-color: #535353; cursor: not-allowed; transform: none; }
+    button.btn-secondary {
+      background-color: transparent;
+      border: 1px solid #535353;
+      color: #b3b3b3;
+      padding: 4px 10px;
+      font-size: 11px;
+      margin: 0;
+    }
+    button.btn-secondary:hover {
+      background-color: #e22134;
+      border-color: #e22134;
+      color: white;
+    }
     input {
       background-color: #282828;
       border: 1px solid #3e3e3e;
@@ -56,7 +69,7 @@
     .hidden { display: none !important; }
     .status { margin-top: 10px; font-size: 12px; color: #b3b3b3; }
 
-    /* Banner */
+    /* Banner de Reproducción */
     .now-playing-banner {
       background-color: #242424;
       border-radius: 8px;
@@ -117,7 +130,7 @@
       margin-top: 4px;
     }
 
-    /* Caja de Logs de actividad */
+    /* Caja de Logs */
     .log-box {
       margin-top: 15px;
       background-color: #121212;
@@ -140,11 +153,13 @@
   <div class="card">
     <h1>Spotify Sync</h1>
 
+    <!-- Paso 1: Login -->
     <div id="login-section">
       <p style="color: #b3b3b3; font-size: 14px;">Inicia sesión con Spotify Premium para coordinar la reproducción.</p>
       <button id="btn-login">Conectar Spotify</button>
     </div>
 
+    <!-- Paso 2: Unirse y Configurar Nombre -->
     <div id="room-section" class="hidden">
       <label style="font-size: 12px; color: #b3b3b3; display: block; margin-bottom: 4px;">Tu nombre / alias:</label>
       <input type="text" id="username-input" placeholder="Cargando perfil...">
@@ -155,12 +170,17 @@
       <button id="btn-join">Entrar a la Sala</button>
     </div>
 
+    <!-- Paso 3: Panel, Banner y Logs -->
     <div id="player-section" class="hidden">
-      <div style="display: flex; justify-content: space-between; font-size: 12px; color: #b3b3b3;">
-        <span>SALA: <b id="current-room-text" style="color:#1DB954;"></b></span>
-        <span>USUARIO: <b id="current-user-text" style="color:#fff;"></b></span>
+      <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #b3b3b3;">
+        <div>
+          <span>SALA: <b id="current-room-text" style="color:#1DB954;"></b></span> | 
+          <span>USUARIO: <b id="current-user-text" style="color:#fff;"></b></span>
+        </div>
+        <button id="btn-logout" class="btn-secondary">Cerrar Sesión</button>
       </div>
 
+      <!-- Banner -->
       <div class="now-playing-banner" id="banner">
         <img id="track-img" class="album-art" src="" alt="Portada">
         <div class="track-info">
@@ -179,6 +199,7 @@
         </div>
       </div>
 
+      <!-- Controles -->
       <div class="controls" style="margin-top: 12px;">
         <button id="btn-prev">⏮</button>
         <button id="btn-play">▶ Play</button>
@@ -186,6 +207,7 @@
         <button id="btn-next">⏭</button>
       </div>
 
+      <!-- Registro de Actividad -->
       <div class="log-box" id="log-box"></div>
 
       <p class="status" id="status-text">Conectado a la sala.</p>
@@ -193,14 +215,14 @@
   </div>
 
   <script>
-    const CLIENT_ID = 'ec678b77a69f45aebc0f6543e900ff3c';   
+    const CLIENT_ID = 'ec678b77a69f45aebc0f6543e900ff3c';
     const REDIRECT_URI = window.location.origin + window.location.pathname;
-    // Agregamos user-read-private para obtener el perfil de Spotify
     const SCOPES = 'user-modify-playback-state user-read-playback-state user-read-private';
 
     const socket = io();
     let accessToken = null;
     let currentUserName = '';
+    let pollInterval = null;
 
     // Elementos DOM
     const loginSec = document.getElementById('login-section');
@@ -276,7 +298,7 @@
         });
         if (res.ok) {
           const user = await res.json();
-          usernameInput.value = user.display_name || user.id;
+          usernameInput.value = user.display_name || user.id || '';
         }
       } catch (e) {
         console.error("Error al obtener perfil:", e);
@@ -317,7 +339,9 @@
       playerSec.classList.remove('hidden');
 
       updateBanner();
-      setInterval(updateBanner, 1000);
+      if (!pollInterval) {
+        pollInterval = setInterval(updateBanner, 1000);
+      }
     });
 
     // --- LOGS ---
@@ -413,7 +437,36 @@
       setTimeout(updateBanner, 500);
     });
 
-    // --- EVENTOS SOCKET.IO (LOGS Y SYNC) ---
+    // --- CERRAR SESIÓN ---
+    document.getElementById('btn-logout').addEventListener('click', () => {
+      accessToken = null;
+      localStorage.removeItem('code_verifier');
+      
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+
+      socket.disconnect();
+      socket.connect();
+
+      document.getElementById('room-input').value = '';
+      document.getElementById('username-input').value = '';
+      document.getElementById('log-box').innerHTML = '';
+      trackTitle.innerText = "Sin reproducción activa";
+      trackArtist.innerText = "Abre Spotify en tu dispositivo";
+      trackImg.src = "";
+      progressFill.style.width = "0%";
+      timeCurrent.innerText = "0:00";
+      timeTotal.innerText = "0:00";
+
+      playerSec.classList.add('hidden');
+      roomSec.classList.add('hidden');
+      loginSec.classList.remove('hidden');
+      statusText.innerText = "Sesión cerrada correctamente.";
+    });
+
+    // --- EVENTOS SOCKET.IO ---
     socket.on('user_joined', (data) => {
       addLog(`<span class="log-time">[${data.time}]</span> <b>${data.user}</b> se unió a la sala.`, true);
     });
