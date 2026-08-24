@@ -54,6 +54,7 @@ io.on('connection', (socket) => {
   socket.on('chat_message', (text) => {
     if (socket.roomId && socket.userData && text && text.trim().length > 0) {
       const msgData = {
+        senderId: socket.id,
         user: socket.userData.name,
         username: socket.userData.username,
         avatar: socket.userData.image,
