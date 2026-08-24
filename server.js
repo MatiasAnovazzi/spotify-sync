@@ -9,8 +9,7 @@ const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Estructura en memoria para almacenar usuarios por sala:
-// { "codigoSala": [ { id, name, username, image, country, product, followers } ] }
+// Almacenamiento en memoria de usuarios por sala
 const roomUsers = {};
 
 function emitRoomUsers(roomId) {
@@ -19,17 +18,16 @@ function emitRoomUsers(roomId) {
 }
 
 io.on('connection', (socket) => {
-  // Unirse a una sala con los datos de perfil de Spotify
+  // Unirse a una sala con datos de perfil
   socket.on('join_room', ({ roomId, profile }) => {
     socket.join(roomId);
     socket.roomId = roomId;
     
-    // Guardar datos del usuario
     socket.userData = {
       socketId: socket.id,
       name: profile.name || 'Usuario',
       username: profile.username || 'usuario',
-      image: profile.image || 'https://via.placeholder.com/150',
+      image: profile.image || 'https://cdn-icons-png.flaticon.com/512/847/847969.png',
       country: profile.country || '--',
       product: profile.product || 'free',
       followers: profile.followers || 0
@@ -39,23 +37,34 @@ io.on('connection', (socket) => {
       roomUsers[roomId] = [];
     }
 
-    // Evitar duplicados si reconecta
     roomUsers[roomId] = roomUsers[roomId].filter(u => u.socketId !== socket.id);
     roomUsers[roomId].push(socket.userData);
 
-    console.log(`[${roomId}] ${socket.userData.name} (@${socket.userData.username}) conectado`);
+    console.log(`[${roomId}] ${socket.userData.name} conectado`);
 
-    // Notificar log de ingreso
     io.to(roomId).emit('user_joined', {
       user: socket.userData.name,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     });
 
-    // Enviar la lista actualizada de usuarios a todos en la sala
     emitRoomUsers(roomId);
   });
 
-  // Retransmitir acciones de reproducción
+  // Manejo de mensajes del Chat
+  socket.on('chat_message', (text) => {
+    if (socket.roomId && socket.userData && text && text.trim().length > 0) {
+      const msgData = {
+        user: socket.userData.name,
+        username: socket.userData.username,
+        avatar: socket.userData.image,
+        text: text.trim(),
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      io.to(socket.roomId).emit('chat_broadcast', msgData);
+    }
+  });
+
+  // Retransmitir acciones multimedia
   socket.on('sync_action', (data) => {
     if (socket.roomId && socket.userData) {
       const payload = {
@@ -78,7 +87,7 @@ io.on('connection', (socket) => {
       if (socket.userData) {
         io.to(roomId).emit('user_left', {
           user: socket.userData.name,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         });
       }
 
