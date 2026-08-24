@@ -9,9 +9,9 @@ const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Estado en memoria por sala
 const roomUsers = {};
-const roomQueues = {}; // { roomId: [ { id, uri, name, artist, image, duration_ms, addedBy } ] }
+const roomQueues = {}; 
+const roomTransitionLock = {}; // Bloqueo para evitar múltiples triggers simultáneos
 
 function emitRoomUsers(roomId) {
   const users = roomUsers[roomId] || [];
@@ -23,8 +23,31 @@ function emitRoomQueue(roomId) {
   io.to(roomId).emit('room_queue_update', queue);
 }
 
+function playNextInQueue(roomId, triggeredByUser = 'Sistema') {
+  if (!roomQueues[roomId] || roomQueues[roomId].length === 0) return;
+
+  // Evitar saltos duplicados si varios clientes reportan fin al mismo segundo
+  if (roomTransitionLock[roomId]) return;
+  roomTransitionLock[roomId] = true;
+  setTimeout(() => { roomTransitionLock[roomId] = false; }, 3000);
+
+  const nextTrack = roomQueues[roomId].shift();
+  emitRoomQueue(roomId);
+
+  const payload = {
+    action: 'play',
+    actionLabel: `reprodujo siguiente de la cola: 🎵 <b>${nextTrack.name}</b>`,
+    trackUri: nextTrack.uri,
+    positionMs: 0,
+    user: triggeredByUser,
+    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  };
+
+  io.to(roomId).emit('apply_action', payload);
+  io.to(roomId).emit('log_action', payload);
+}
+
 io.on('connection', (socket) => {
-  // Unirse a una sala
   socket.on('join_room', ({ roomId, profile }) => {
     socket.join(roomId);
     socket.roomId = roomId;
@@ -45,8 +68,6 @@ io.on('connection', (socket) => {
     roomUsers[roomId] = roomUsers[roomId].filter(u => u.socketId !== socket.id);
     roomUsers[roomId].push(socket.userData);
 
-    console.log(`[${roomId}] ${socket.userData.name} conectado`);
-
     io.to(roomId).emit('user_joined', {
       user: socket.userData.name,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -56,7 +77,7 @@ io.on('connection', (socket) => {
     emitRoomQueue(roomId);
   });
 
-  // Agregar canción a la cola de la sala
+  // Agregar canción a la cola
   socket.on('add_to_queue', (track) => {
     if (socket.roomId) {
       if (!roomQueues[socket.roomId]) roomQueues[socket.roomId] = [];
@@ -74,7 +95,6 @@ io.on('connection', (socket) => {
       roomQueues[socket.roomId].push(queueItem);
       emitRoomQueue(socket.roomId);
 
-      // Log
       io.to(socket.roomId).emit('log_action', {
         user: socket.userData ? socket.userData.name : 'Alguien',
         actionLabel: `añadió a la cola: 🎵 <b>${track.name}</b>`,
@@ -83,7 +103,14 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Reproducir el siguiente tema de la cola o un tema específico
+  // Auto-next: Notificación de canción terminada desde el cliente
+  socket.on('track_ended', () => {
+    if (socket.roomId) {
+      playNextInQueue(socket.roomId, 'Cola Automática');
+    }
+  });
+
+  // Reproducir un tema específico de la cola manualmente
   socket.on('play_from_queue', (queueItemId) => {
     if (socket.roomId && roomQueues[socket.roomId]) {
       const index = roomQueues[socket.roomId].findIndex(item => item.id === queueItemId);
@@ -106,7 +133,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Quitar de la cola sin reproducir
+  // Quitar de la cola
   socket.on('remove_from_queue', (queueItemId) => {
     if (socket.roomId && roomQueues[socket.roomId]) {
       roomQueues[socket.roomId] = roomQueues[socket.roomId].filter(item => item.id !== queueItemId);
@@ -114,7 +141,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Manejo de mensajes del Chat
+  // Chat
   socket.on('chat_message', (text) => {
     if (socket.roomId && socket.userData && text && text.trim().length > 0) {
       const msgData = {
@@ -129,9 +156,15 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Retransmitir acciones multimedia normales
+  // Acciones multimedia del cliente
   socket.on('sync_action', (data) => {
     if (socket.roomId && socket.userData) {
+      // Si aprietan botón "Siguiente" y hay cola, consumir la cola primero
+      if (data.action === 'next' && roomQueues[socket.roomId] && roomQueues[socket.roomId].length > 0) {
+        playNextInQueue(socket.roomId, socket.userData.name);
+        return;
+      }
+
       const payload = {
         ...data,
         user: socket.userData.name,
@@ -143,7 +176,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Desconexión
   socket.on('disconnect', () => {
     const roomId = socket.roomId;
     if (roomId && roomUsers[roomId]) {
@@ -161,6 +193,7 @@ io.on('connection', (socket) => {
       if (roomUsers[roomId].length === 0) {
         delete roomUsers[roomId];
         delete roomQueues[roomId];
+        delete roomTransitionLock[roomId];
       }
     }
   });
