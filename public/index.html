@@ -6,6 +6,13 @@
   <title>Spotify Sync Party</title>
   <script src="/socket.io/socket.io.js"></script>
   <style>
+    :root {
+      --accent-color: #1DB954;
+      --accent-hover: #1ed760;
+      --accent-text-mine: #000000;
+      --accent-header-mine: #0a3d1b;
+    }
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       background-color: #000000;
@@ -27,10 +34,10 @@
       text-align: center;
       box-shadow: 0 10px 30px rgba(0,0,0,0.7);
     }
-    h1 { color: #1DB954; font-size: 20px; margin: 0 0 12px 0; }
+    h1 { color: var(--accent-color); font-size: 20px; margin: 0 0 12px 0; transition: color 0.3s; }
     
     button {
-      background-color: #1DB954;
+      background-color: var(--accent-color);
       color: white;
       border: none;
       padding: 8px 16px;
@@ -41,7 +48,7 @@
       margin: 4px 2px;
       transition: background 0.2s, transform 0.1s;
     }
-    button:hover { background-color: #1ed760; transform: scale(1.02); }
+    button:hover { background-color: var(--accent-hover); transform: scale(1.02); }
     button:active { transform: scale(0.98); }
     button.btn-secondary {
       background-color: transparent;
@@ -68,9 +75,28 @@
       font-size: 13px;
       box-sizing: border-box;
     }
-    input:focus { outline: 1px solid #1DB954; border-color: #1DB954; }
+    input:focus { outline: 1px solid var(--accent-color); border-color: var(--accent-color); }
     .hidden { display: none !important; }
     .status { margin-top: 8px; font-size: 11px; color: #71767B; }
+
+    /* Selector de Temas / Colores */
+    .theme-picker {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .theme-dot {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      cursor: pointer;
+      border: 2px solid transparent;
+      transition: transform 0.2s, border-color 0.2s;
+    }
+    .theme-dot:hover { transform: scale(1.2); }
+    .theme-dot.active { border-color: #ffffff; transform: scale(1.15); }
 
     /* Sección de Usuarios */
     .section-title {
@@ -138,9 +164,9 @@
       border-radius: 4px;
       border: 1px solid #333639;
     }
-    .badge-premium { color: #1DB954; border-color: rgba(29, 185, 84, 0.4); }
+    .badge-premium { color: var(--accent-color); border-color: var(--accent-color); }
 
-    /* Banner de Reproducción */
+    /* Banner */
     .now-playing-banner {
       background-color: #000000;
       border: 1px solid #2F3336;
@@ -184,11 +210,11 @@
       width: 100%;
     }
     .progress-bar-fill {
-      background-color: #1DB954;
+      background-color: var(--accent-color);
       height: 100%;
       border-radius: 2px;
       width: 0%;
-      transition: width 0.3s linear;
+      transition: width 0.3s linear, background-color 0.3s;
     }
     .time-stamps {
       display: flex;
@@ -256,17 +282,18 @@
       display: none;
     }
     .chat-msg-row.mine .chat-msg-body {
-      background-color: #1DB954;
+      background-color: var(--accent-color);
       border-radius: 12px 12px 2px 12px;
       text-align: right;
+      transition: background-color 0.3s;
     }
     .chat-msg-row.mine .chat-msg-header {
-      color: #0a3d1b;
+      color: var(--accent-header-mine);
       font-size: 9px;
     }
     .chat-msg-row.mine .chat-msg-text {
-      color: #000000;
-      font-weight: 500;
+      color: var(--accent-text-mine);
+      font-weight: 600;
       text-align: left;
     }
 
@@ -304,13 +331,22 @@
     .log-entry { margin-bottom: 2px; color: #71767B; }
     .log-entry b { color: #E7E9EA; }
     .log-entry .log-time { color: #404448; font-size: 9px; margin-right: 3px; }
-    .log-entry.system { color: #1DB954; font-style: italic; }
+    .log-entry.system { color: var(--accent-color); font-style: italic; }
   </style>
 </head>
 <body>
 
   <div class="card">
     <h1>Spotify Sync</h1>
+
+    <!-- Selector de Presets de Color -->
+    <div class="theme-picker">
+      <div class="theme-dot active" style="background:#1DB954;" data-theme="green" title="Spotify Verde"></div>
+      <div class="theme-dot" style="background:#00D2FF;" data-theme="cyan" title="Cyan Neón"></div>
+      <div class="theme-dot" style="background:#A855F7;" data-theme="purple" title="Púrpura"></div>
+      <div class="theme-dot" style="background:#FF7A00;" data-theme="orange" title="Naranja Eléctrico"></div>
+      <div class="theme-dot" style="background:#FF2E93;" data-theme="pink" title="Rosa Fucsia"></div>
+    </div>
 
     <!-- Paso 1: Login -->
     <div id="login-section">
@@ -332,7 +368,7 @@
     <!-- Paso 3: Dashboard Principal -->
     <div id="player-section" class="hidden">
       <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #71767B;">
-        <span>SALA: <b id="current-room-text" style="color:#1DB954;"></b></span>
+        <span>SALA: <b id="current-room-text" style="color: var(--accent-color);"></b></span>
         <button id="btn-logout" class="btn-secondary">Cerrar Sesión</button>
       </div>
 
@@ -389,6 +425,36 @@
     const CLIENT_ID = 'ec678b77a69f45aebc0f6543e900ff3c';
     const REDIRECT_URI = window.location.origin + window.location.pathname;
     const SCOPES = 'user-modify-playback-state user-read-playback-state user-read-private user-read-email';
+
+    // --- CONFIGURACIÓN DE TEMAS ---
+    const THEMES = {
+      green: { accent: '#1DB954', hover: '#1ed760', textMine: '#000000', headerMine: '#0a3d1b' },
+      cyan: { accent: '#00D2FF', hover: '#38dcff', textMine: '#000000', headerMine: '#003e4d' },
+      purple: { accent: '#A855F7', hover: '#b86ff8', textMine: '#FFFFFF', headerMine: '#380e5e' },
+      orange: { accent: '#FF7A00', hover: '#ff8f26', textMine: '#000000', headerMine: '#4d2400' },
+      pink: { accent: '#FF2E93', hover: '#ff4ea3', textMine: '#FFFFFF', headerMine: '#4d0026' }
+    };
+
+    function applyTheme(themeKey) {
+      const theme = THEMES[themeKey] || THEMES.green;
+      document.documentElement.style.setProperty('--accent-color', theme.accent);
+      document.documentElement.style.setProperty('--accent-hover', theme.hover);
+      document.documentElement.style.setProperty('--accent-text-mine', theme.textMine);
+      document.documentElement.style.setProperty('--accent-header-mine', theme.headerMine);
+
+      document.querySelectorAll('.theme-dot').forEach(dot => {
+        dot.classList.toggle('active', dot.dataset.theme === themeKey);
+      });
+      localStorage.setItem('selected_theme', themeKey);
+    }
+
+    document.querySelectorAll('.theme-dot').forEach(dot => {
+      dot.addEventListener('click', () => applyTheme(dot.dataset.theme));
+    });
+
+    // Cargar tema guardado
+    const savedTheme = localStorage.getItem('selected_theme') || 'green';
+    applyTheme(savedTheme);
 
     const socket = io();
     let accessToken = null;
