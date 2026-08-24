@@ -9,44 +9,84 @@ const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Estructura en memoria para almacenar usuarios por sala:
+// { "codigoSala": [ { id, name, username, image, country, product, followers } ] }
+const roomUsers = {};
+
+function emitRoomUsers(roomId) {
+  const users = roomUsers[roomId] || [];
+  io.to(roomId).emit('room_users_update', users);
+}
+
 io.on('connection', (socket) => {
-  // Unirse a una sala con nombre de usuario
-  socket.on('join_room', ({ roomId, userName }) => {
+  // Unirse a una sala con los datos de perfil de Spotify
+  socket.on('join_room', ({ roomId, profile }) => {
     socket.join(roomId);
     socket.roomId = roomId;
-    socket.userName = userName || 'Usuario Anónimo';
+    
+    // Guardar datos del usuario
+    socket.userData = {
+      socketId: socket.id,
+      name: profile.name || 'Usuario',
+      username: profile.username || 'usuario',
+      image: profile.image || 'https://via.placeholder.com/150',
+      country: profile.country || '--',
+      product: profile.product || 'free',
+      followers: profile.followers || 0
+    };
 
-    console.log(`[${socket.roomId}] ${socket.userName} conectado (${socket.id})`);
+    if (!roomUsers[roomId]) {
+      roomUsers[roomId] = [];
+    }
 
-    // Notificar a todos en la sala que alguien entró
-    io.to(socket.roomId).emit('user_joined', {
-      user: socket.userName,
+    // Evitar duplicados si reconecta
+    roomUsers[roomId] = roomUsers[roomId].filter(u => u.socketId !== socket.id);
+    roomUsers[roomId].push(socket.userData);
+
+    console.log(`[${roomId}] ${socket.userData.name} (@${socket.userData.username}) conectado`);
+
+    // Notificar log de ingreso
+    io.to(roomId).emit('user_joined', {
+      user: socket.userData.name,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     });
+
+    // Enviar la lista actualizada de usuarios a todos en la sala
+    emitRoomUsers(roomId);
   });
 
   // Retransmitir acciones de reproducción
   socket.on('sync_action', (data) => {
-    if (socket.roomId) {
+    if (socket.roomId && socket.userData) {
       const payload = {
         ...data,
-        user: socket.userName || 'Alguien',
+        user: socket.userData.name,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
       };
       
-      // Enviar a todos los demás en la sala
       socket.to(socket.roomId).emit('apply_action', payload);
-      // Enviar el evento de log a TODOS (incluyendo el emisor)
       io.to(socket.roomId).emit('log_action', payload);
     }
   });
 
+  // Desconexión
   socket.on('disconnect', () => {
-    if (socket.roomId && socket.userName) {
-      io.to(socket.roomId).emit('user_left', {
-        user: socket.userName,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-      });
+    const roomId = socket.roomId;
+    if (roomId && roomUsers[roomId]) {
+      roomUsers[roomId] = roomUsers[roomId].filter(u => u.socketId !== socket.id);
+
+      if (socket.userData) {
+        io.to(roomId).emit('user_left', {
+          user: socket.userData.name,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        });
+      }
+
+      emitRoomUsers(roomId);
+
+      if (roomUsers[roomId].length === 0) {
+        delete roomUsers[roomId];
+      }
     }
   });
 });

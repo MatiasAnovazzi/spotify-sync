@@ -7,94 +7,174 @@
   <script src="/socket.io/socket.io.js"></script>
   <style>
     body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background-color: #121212;
-      color: #FFFFFF;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #000000;
+      color: #E7E9EA;
       display: flex;
       justify-content: center;
       align-items: center;
       min-height: 100vh;
       margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
     }
     .card {
-      background-color: #181818;
-      border-radius: 12px;
+      background-color: #16181C;
+      border: 1px solid #2F3336;
+      border-radius: 16px;
       padding: 24px;
-      width: 400px;
+      width: 440px;
       text-align: center;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.7);
     }
-    h1 { color: #1DB954; font-size: 24px; margin: 0 0 16px 0; }
+    h1 { color: #1DB954; font-size: 22px; margin: 0 0 16px 0; }
+    
     button {
       background-color: #1DB954;
       color: white;
       border: none;
       padding: 10px 18px;
-      border-radius: 50px;
-      font-weight: bold;
+      border-radius: 9999px;
+      font-weight: 700;
       cursor: pointer;
-      font-size: 14px;
+      font-size: 13px;
       margin: 4px 2px;
       transition: background 0.2s, transform 0.1s;
     }
-    button:hover { background-color: #1ed760; transform: scale(1.03); }
+    button:hover { background-color: #1ed760; transform: scale(1.02); }
     button:active { transform: scale(0.98); }
-    button:disabled { background-color: #535353; cursor: not-allowed; transform: none; }
     button.btn-secondary {
       background-color: transparent;
-      border: 1px solid #535353;
-      color: #b3b3b3;
-      padding: 4px 10px;
+      border: 1px solid #536471;
+      color: #EFF3F4;
+      padding: 5px 12px;
       font-size: 11px;
       margin: 0;
     }
     button.btn-secondary:hover {
-      background-color: #e22134;
-      border-color: #e22134;
-      color: white;
+      background-color: rgba(244, 33, 46, 0.1);
+      border-color: #F4212E;
+      color: #F4212E;
     }
     input {
-      background-color: #282828;
-      border: 1px solid #3e3e3e;
-      color: white;
+      background-color: #202327;
+      border: 1px solid #333639;
+      color: #fff;
       padding: 10px;
-      border-radius: 6px;
+      border-radius: 8px;
       width: 85%;
       margin-bottom: 10px;
       text-align: center;
       font-size: 14px;
       box-sizing: border-box;
     }
-    input:focus { outline: 1px solid #1DB954; }
+    input:focus { outline: 1px solid #1DB954; border-color: #1DB954; }
     .hidden { display: none !important; }
-    .status { margin-top: 10px; font-size: 12px; color: #b3b3b3; }
+    .status { margin-top: 10px; font-size: 11px; color: #71767B; }
+
+    /* Sección de Usuarios Conectados (Estilo Twitter) */
+    .section-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #71767B;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 16px 0 8px 0;
+      text-align: left;
+    }
+    .users-container {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 170px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .twitter-user-card {
+      background-color: #000000;
+      border: 1px solid #2F3336;
+      border-radius: 12px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-align: left;
+      position: relative;
+    }
+    .twitter-avatar {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 1px solid #333639;
+      background-color: #202327;
+      flex-shrink: 0;
+    }
+    .twitter-user-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .user-name-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .user-display-name {
+      font-size: 13px;
+      font-weight: 700;
+      color: #E7E9EA;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .user-handle {
+      font-size: 12px;
+      color: #71767B;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .user-badges {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+      font-size: 10px;
+      color: #71767B;
+    }
+    .badge {
+      background-color: #202327;
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid #333639;
+    }
+    .badge-premium {
+      color: #1DB954;
+      border-color: rgba(29, 185, 84, 0.4);
+    }
 
     /* Banner de Reproducción */
     .now-playing-banner {
-      background-color: #242424;
-      border-radius: 8px;
-      padding: 14px;
-      margin-top: 12px;
+      background-color: #000000;
+      border: 1px solid #2F3336;
+      border-radius: 12px;
+      padding: 12px;
+      margin-top: 10px;
       display: flex;
       flex-direction: column;
       align-items: center;
     }
     .album-art {
-      width: 150px;
-      height: 150px;
+      width: 130px;
+      height: 130px;
       border-radius: 8px;
       object-fit: cover;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-      margin-bottom: 10px;
-      background-color: #333;
-    }
-    .track-info {
-      width: 100%;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
       margin-bottom: 8px;
     }
+    .track-info { width: 100%; margin-bottom: 6px; }
     .track-title {
-      font-size: 15px;
-      font-weight: bold;
+      font-size: 14px;
+      font-weight: 700;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -102,15 +182,15 @@
     }
     .track-artist {
       font-size: 12px;
-      color: #b3b3b3;
-      margin: 3px 0 0 0;
+      color: #71767B;
+      margin: 2px 0 0 0;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .progress-container { width: 100%; margin-top: 4px; }
     .progress-bar-bg {
-      background-color: #4f4f4f;
+      background-color: #2F3336;
       height: 4px;
       border-radius: 2px;
       width: 100%;
@@ -125,26 +205,26 @@
     .time-stamps {
       display: flex;
       justify-content: space-between;
-      font-size: 11px;
-      color: #b3b3b3;
+      font-size: 10px;
+      color: #71767B;
       margin-top: 4px;
     }
 
-    /* Caja de Logs */
+    /* Logs */
     .log-box {
-      margin-top: 15px;
-      background-color: #121212;
-      border: 1px solid #282828;
-      border-radius: 6px;
-      height: 110px;
+      margin-top: 10px;
+      background-color: #000000;
+      border: 1px solid #2F3336;
+      border-radius: 8px;
+      height: 90px;
       overflow-y: auto;
       text-align: left;
-      padding: 8px 12px;
-      font-size: 12px;
+      padding: 6px 10px;
+      font-size: 11px;
     }
-    .log-entry { margin-bottom: 4px; color: #a0a0a0; }
-    .log-entry b { color: #ffffff; }
-    .log-entry .log-time { color: #666; font-size: 10px; margin-right: 4px; }
+    .log-entry { margin-bottom: 3px; color: #71767B; }
+    .log-entry b { color: #E7E9EA; }
+    .log-entry .log-time { color: #404448; font-size: 9px; margin-right: 4px; }
     .log-entry.system { color: #1DB954; font-style: italic; }
   </style>
 </head>
@@ -155,32 +235,29 @@
 
     <!-- Paso 1: Login -->
     <div id="login-section">
-      <p style="color: #b3b3b3; font-size: 14px;">Inicia sesión con Spotify Premium para coordinar la reproducción.</p>
+      <p style="color: #71767B; font-size: 13px;">Inicia sesión con tu cuenta de Spotify Premium para sincronizarte con la sala.</p>
       <button id="btn-login">Conectar Spotify</button>
     </div>
 
-    <!-- Paso 2: Unirse y Configurar Nombre -->
+    <!-- Paso 2: Unirse a Sala -->
     <div id="room-section" class="hidden">
-      <label style="font-size: 12px; color: #b3b3b3; display: block; margin-bottom: 4px;">Tu nombre / alias:</label>
-      <input type="text" id="username-input" placeholder="Cargando perfil...">
-      
-      <label style="font-size: 12px; color: #b3b3b3; display: block; margin-bottom: 4px;">Código de Sala:</label>
-      <input type="text" id="room-input" placeholder="ej. fiesta1">
+      <label style="font-size: 12px; color: #71767B; display: block; margin-bottom: 4px;">Tu Nombre / Alias:</label>
+      <input type="text" id="username-input" placeholder="Cargando...">
+
+      <label style="font-size: 12px; color: #71767B; display: block; margin-bottom: 4px;">Código de Sala:</label>
+      <input type="text" id="room-input" placeholder="ej. musica123">
       <br>
       <button id="btn-join">Entrar a la Sala</button>
     </div>
 
-    <!-- Paso 3: Panel, Banner y Logs -->
+    <!-- Paso 3: Dashboard -->
     <div id="player-section" class="hidden">
-      <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #b3b3b3;">
-        <div>
-          <span>SALA: <b id="current-room-text" style="color:#1DB954;"></b></span> | 
-          <span>USUARIO: <b id="current-user-text" style="color:#fff;"></b></span>
-        </div>
+      <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #71767B;">
+        <span>SALA: <b id="current-room-text" style="color:#1DB954;"></b></span>
         <button id="btn-logout" class="btn-secondary">Cerrar Sesión</button>
       </div>
 
-      <!-- Banner -->
+      <!-- Banner de Reproducción -->
       <div class="now-playing-banner" id="banner">
         <img id="track-img" class="album-art" src="" alt="Portada" style="display: none;">
         <div class="track-info">
@@ -200,14 +277,19 @@
       </div>
 
       <!-- Controles -->
-      <div class="controls" style="margin-top: 12px;">
+      <div style="margin-top: 8px;">
         <button id="btn-prev">⏮</button>
         <button id="btn-play">▶ Play</button>
         <button id="btn-pause">⏸ Pausa</button>
         <button id="btn-next">⏭</button>
       </div>
 
-      <!-- Registro de Actividad -->
+      <!-- Banners de Usuarios Conectados -->
+      <div class="section-title">En esta sala (<span id="user-count">0</span>)</div>
+      <div class="users-container" id="users-container"></div>
+
+      <!-- Logs -->
+      <div class="section-title">Actividad</div>
       <div class="log-box" id="log-box"></div>
 
       <p class="status" id="status-text">Conectado a la sala.</p>
@@ -217,14 +299,14 @@
   <script>
     const CLIENT_ID = 'ec678b77a69f45aebc0f6543e900ff3c';
     const REDIRECT_URI = window.location.origin + window.location.pathname;
-    const SCOPES = 'user-modify-playback-state user-read-playback-state user-read-private';
+    const SCOPES = 'user-modify-playback-state user-read-playback-state user-read-private user-read-email';
 
     const socket = io();
     let accessToken = null;
-    let currentUserName = '';
     let pollInterval = null;
+    let userProfile = {};
 
-    // Elementos DOM
+    // DOM Elements
     const loginSec = document.getElementById('login-section');
     const roomSec = document.getElementById('room-section');
     const playerSec = document.getElementById('player-section');
@@ -232,6 +314,8 @@
     const usernameInput = document.getElementById('username-input');
     const statusText = document.getElementById('status-text');
     const logBox = document.getElementById('log-box');
+    const usersContainer = document.getElementById('users-container');
+    const userCount = document.getElementById('user-count');
 
     const trackImg = document.getElementById('track-img');
     const trackTitle = document.getElementById('track-title');
@@ -240,7 +324,7 @@
     const timeCurrent = document.getElementById('time-current');
     const timeTotal = document.getElementById('time-total');
 
-    // --- PKCE AUTH ---
+    // --- PKCE ---
     function generateRandomString(length) {
       const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
       const values = crypto.getRandomValues(new Uint8Array(length));
@@ -275,10 +359,7 @@
 
     async function getAccessToken(code) {
       const verifier = localStorage.getItem('code_verifier');
-      if (!verifier) {
-        console.error("No se encontró el code_verifier en localStorage.");
-        return null;
-      }
+      if (!verifier) return null;
 
       try {
         const response = await fetch('https://accounts.spotify.com/api/token', {
@@ -292,41 +373,35 @@
             code_verifier: verifier,
           }),
         });
-
         const data = await response.json();
-        console.log('Respuesta del token de Spotify:', data);
-
-        if (data.error) {
-          console.error('Error de autenticación:', data.error_description || data.error);
-          return null;
-        }
-
-        return data.access_token;
+        return data.access_token || null;
       } catch (err) {
-        console.error("Fallo al contactar endpoint de token:", err);
+        console.error(err);
         return null;
       }
     }
 
-    // --- CARGAR PERFIL DE SPOTIFY ---
+    // --- CARGAR PERFIL EXTENDIDO ---
     async function fetchUserProfile() {
       if (!accessToken) return;
       try {
         const res = await fetch('https://api.spotify.com/v1/me', {
           headers: { 'Authorization': `Bearer ${accessToken}` }
         });
-
         if (res.ok) {
           const user = await res.json();
-          usernameInput.value = user.display_name || user.id || '';
-        } else {
-          const errData = await res.json();
-          console.warn("No se pudo obtener el perfil:", errData);
-          usernameInput.value = 'Usuario';
+          userProfile = {
+            name: user.display_name || user.id,
+            username: user.id || 'spotify_user',
+            image: (user.images && user.images.length > 0) ? user.images[0].url : 'https://cdn-icons-png.flaticon.com/512/847/847969.png',
+            country: user.country || 'N/A',
+            product: user.product || 'free',
+            followers: user.followers ? user.followers.total : 0
+          };
+          usernameInput.value = userProfile.name;
         }
       } catch (e) {
         console.error("Error al obtener perfil:", e);
-        usernameInput.value = 'Usuario';
       }
     }
 
@@ -336,18 +411,15 @@
       const code = urlParams.get('code');
 
       if (code) {
-        statusText.innerText = "Autenticando con Spotify...";
-        const token = await getAccessToken(code);
-
-        if (token) {
-          accessToken = token;
+        statusText.innerText = "Autenticando...";
+        accessToken = await getAccessToken(code);
+        if (accessToken) {
           window.history.replaceState({}, document.title, window.location.pathname);
           loginSec.classList.add('hidden');
           roomSec.classList.remove('hidden');
-
           await fetchUserProfile();
         } else {
-          statusText.innerText = "Error de autenticación. Revisa la consola.";
+          statusText.innerText = "Error al autenticar.";
         }
       }
     });
@@ -356,16 +428,14 @@
 
     document.getElementById('btn-join').addEventListener('click', () => {
       const roomId = roomInput.value.trim();
-      const userName = usernameInput.value.trim() || 'Invitado';
-
+      const customName = usernameInput.value.trim();
       if (!roomId) return alert("Ingresa un código de sala");
 
-      currentUserName = userName;
-      socket.emit('join_room', { roomId, userName });
+      if (customName) userProfile.name = customName;
+
+      socket.emit('join_room', { roomId, profile: userProfile });
 
       document.getElementById('current-room-text').innerText = roomId;
-      document.getElementById('current-user-text').innerText = userName;
-
       roomSec.classList.add('hidden');
       playerSec.classList.remove('hidden');
 
@@ -374,6 +444,34 @@
         pollInterval = setInterval(updateBanner, 1000);
       }
     });
+
+    // --- RENDERIZAR USUARIOS ESTILO TWITTER ---
+    function renderRoomUsers(users) {
+      userCount.innerText = users.length;
+      usersContainer.innerHTML = '';
+
+      users.forEach(user => {
+        const isPremium = user.product === 'premium';
+        const card = document.createElement('div');
+        card.className = 'twitter-user-card';
+
+        card.innerHTML = `
+          <img src="${user.image}" class="twitter-avatar" alt="${user.name}">
+          <div class="twitter-user-info">
+            <div class="user-name-row">
+              <span class="user-display-name">${user.name}</span>
+            </div>
+            <div class="user-handle">@${user.username}</div>
+            <div class="user-badges">
+              <span class="badge ${isPremium ? 'badge-premium' : ''}">${isPremium ? '★ Premium' : 'Free'}</span>
+              <span class="badge">📍 ${user.country}</span>
+              <span class="badge">👥 ${user.followers} seg.</span>
+            </div>
+          </div>
+        `;
+        usersContainer.appendChild(card);
+      });
+    }
 
     // --- LOGS ---
     function addLog(html, isSystem = false) {
@@ -384,7 +482,7 @@
       logBox.scrollTop = logBox.scrollHeight;
     }
 
-    // --- API SPOTIFY ---
+    // --- SPOTIFY PLAYER API ---
     async function spotifyApiCall(endpoint, method = 'GET', body = null) {
       if (!accessToken) return null;
       const options = {
@@ -395,15 +493,9 @@
         }
       };
       if (body) options.body = JSON.stringify(body);
-
       try {
-        const res = await fetch(`https://api.spotify.com/v1/me/player${endpoint}`, options);
-        if (res.status === 403) {
-          statusText.innerText = "Error 403: Cuenta no Premium o dispositivo inactivo.";
-        }
-        return res;
+        return await fetch(`https://api.spotify.com/v1/me/player${endpoint}`, options);
       } catch (err) {
-        console.error("Error en spotifyApiCall:", err);
         return null;
       }
     }
@@ -438,9 +530,7 @@
           timeCurrent.innerText = formatTime(currentMs);
           timeTotal.innerText = formatTime(totalMs);
         }
-      } catch (err) {
-        console.error("Error actualizando banner:", err);
-      }
+      } catch (err) {}
     }
 
     // --- ACCIONES LOCALES ---
@@ -479,15 +569,12 @@
       setTimeout(updateBanner, 500);
     });
 
-    // --- CERRAR SESIÓN ---
+    // --- LOGOUT ---
     document.getElementById('btn-logout').addEventListener('click', () => {
       accessToken = null;
       localStorage.removeItem('code_verifier');
       
-      if (pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
-      }
+      if (pollInterval) clearInterval(pollInterval);
 
       socket.disconnect();
       socket.connect();
@@ -495,21 +582,23 @@
       document.getElementById('room-input').value = '';
       document.getElementById('username-input').value = '';
       document.getElementById('log-box').innerHTML = '';
+      usersContainer.innerHTML = '';
+      userCount.innerText = '0';
+      trackImg.style.display = "none";
       trackTitle.innerText = "Sin reproducción activa";
       trackArtist.innerText = "Abre Spotify en tu dispositivo";
-      trackImg.src = "";
-      trackImg.style.display = "none";
-      progressFill.style.width = "0%";
-      timeCurrent.innerText = "0:00";
-      timeTotal.innerText = "0:00";
 
       playerSec.classList.add('hidden');
       roomSec.classList.add('hidden');
       loginSec.classList.remove('hidden');
-      statusText.innerText = "Sesión cerrada correctamente.";
+      statusText.innerText = "Sesión cerrada.";
     });
 
     // --- EVENTOS SOCKET.IO ---
+    socket.on('room_users_update', (users) => {
+      renderRoomUsers(users);
+    });
+
     socket.on('user_joined', (data) => {
       addLog(`<span class="log-time">[${data.time}]</span> <b>${data.user}</b> se unió a la sala.`, true);
     });
