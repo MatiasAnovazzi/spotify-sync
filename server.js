@@ -86,6 +86,11 @@ io.on('connection', (socket) => {
     socket.join(roomId);
     socket.roomId = roomId;
 
+    if (!roomUsers[roomId]) roomUsers[roomId] = [];
+    if (!roomQueues[roomId]) roomQueues[roomId] = [];
+
+    const isFirstUser = roomUsers[roomId].length === 0;
+
     socket.userData = {
       socketId: socket.id,
       name: profile.name || 'Usuario',
@@ -93,17 +98,16 @@ io.on('connection', (socket) => {
       image: profile.image || 'https://cdn-icons-png.flaticon.com/512/847/847969.png',
       country: profile.country || '--',
       product: profile.product || 'free',
-      followers: profile.followers || 0
+      followers: profile.followers || 0,
+      isHost: isFirstUser
     };
-
-    if (!roomUsers[roomId]) roomUsers[roomId] = [];
-    if (!roomQueues[roomId]) roomQueues[roomId] = [];
 
     roomUsers[roomId] = roomUsers[roomId].filter(u => u.socketId !== socket.id);
     roomUsers[roomId].push(socket.userData);
 
     io.to(roomId).emit('user_joined', {
       user: socket.userData.name,
+      isHost: socket.userData.isHost,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     });
 
@@ -162,6 +166,36 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Reacciones flotantes en vivo
+  socket.on('send_reaction', (data) => {
+    if (socket.roomId && socket.userData) {
+      io.to(socket.roomId).emit('room_reaction', {
+        id: Date.now() + Math.random().toString(36).substr(2, 4),
+        emoji: data.emoji || '🔥',
+        user: socket.userData.name,
+        avatar: socket.userData.image
+      });
+    }
+  });
+
+  // Indicador de escritura en chat
+  socket.on('typing_start', () => {
+    if (socket.roomId && socket.userData) {
+      socket.to(socket.roomId).emit('user_typing_start', {
+        userId: socket.id,
+        userName: socket.userData.name
+      });
+    }
+  });
+
+  socket.on('typing_stop', () => {
+    if (socket.roomId) {
+      socket.to(socket.roomId).emit('user_typing_stop', {
+        userId: socket.id
+      });
+    }
+  });
+
   // Agregar canción a la cola
   socket.on('add_to_queue', (track) => {
     if (socket.roomId) {
@@ -174,7 +208,9 @@ io.on('connection', (socket) => {
         artist: track.artist,
         image: track.image,
         duration_ms: track.duration_ms,
-        addedBy: socket.userData ? socket.userData.name : 'Alguien'
+        addedBy: socket.userData ? socket.userData.name : 'Alguien',
+        upvotes: 0,
+        upvotedBy: []
       };
 
       roomQueues[socket.roomId].push(queueItem);
@@ -183,6 +219,39 @@ io.on('connection', (socket) => {
       io.to(socket.roomId).emit('log_action', {
         user: socket.userData ? socket.userData.name : 'Alguien',
         actionLabel: `añadió a la cola: 🎵 <b>${track.name}</b>`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+    }
+  });
+
+  // Votar por un tema en la cola (Upvote)
+  socket.on('upvote_queue_item', (queueItemId) => {
+    if (socket.roomId && roomQueues[socket.roomId]) {
+      const item = roomQueues[socket.roomId].find(i => i.id === queueItemId);
+      if (item) {
+        if (!item.upvotes) item.upvotes = 0;
+        if (!item.upvotedBy) item.upvotedBy = [];
+
+        const userKey = socket.userData ? (socket.userData.username || socket.userData.name) : socket.id;
+        if (!item.upvotedBy.includes(userKey)) {
+          item.upvotedBy.push(userKey);
+          item.upvotes += 1;
+          // Ordenar temas por votos (manteniendo el que tenga más arriba)
+          roomQueues[socket.roomId].sort((a, b) => (b.upvotes || 0) - (a.upvotes || 0));
+          emitRoomQueue(socket.roomId);
+        }
+      }
+    }
+  });
+
+  // Vaciar toda la cola
+  socket.on('clear_queue', () => {
+    if (socket.roomId && roomQueues[socket.roomId]) {
+      roomQueues[socket.roomId] = [];
+      emitRoomQueue(socket.roomId);
+      io.to(socket.roomId).emit('log_action', {
+        user: socket.userData ? socket.userData.name : 'Alguien',
+        actionLabel: 'vació la cola de reproducción',
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
       });
     }
@@ -251,6 +320,7 @@ io.on('connection', (socket) => {
         user: socket.userData.name,
         username: socket.userData.username,
         avatar: socket.userData.image,
+        isHost: socket.userData.isHost,
         text: text.trim(),
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
@@ -296,6 +366,11 @@ io.on('connection', (socket) => {
           positionMs: currentPos,
           serverTimestamp: now
         };
+      } else if (data.action === 'seek') {
+        if (roomPlaybackState[socket.roomId]) {
+          roomPlaybackState[socket.roomId].positionMs = typeof data.positionMs === 'number' ? data.positionMs : 0;
+          roomPlaybackState[socket.roomId].serverTimestamp = now;
+        }
       }
       
       socket.to(socket.roomId).emit('apply_action', payload);
@@ -306,11 +381,17 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const roomId = socket.roomId;
     if (roomId && roomUsers[roomId]) {
+      const leavingUser = socket.userData;
       roomUsers[roomId] = roomUsers[roomId].filter(u => u.socketId !== socket.id);
 
-      if (socket.userData) {
+      // Si quien salió era el host y quedan usuarios, transferir rol de DJ
+      if (leavingUser && leavingUser.isHost && roomUsers[roomId].length > 0) {
+        roomUsers[roomId][0].isHost = true;
+      }
+
+      if (leavingUser) {
         io.to(roomId).emit('user_left', {
-          user: socket.userData.name,
+          user: leavingUser.name,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         });
       }
