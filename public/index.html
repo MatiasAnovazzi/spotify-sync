@@ -812,6 +812,26 @@
       color: var(--text-muted);
     }
 
+    /* DJ Switch & Drop Badges */
+    .dj-slider:before {
+      position: absolute;
+      content: "";
+      height: 14px;
+      width: 14px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .3s;
+      border-radius: 50%;
+    }
+    input:checked + .dj-slider {
+      background-color: var(--accent-color);
+      box-shadow: 0 0 10px var(--accent-glow);
+    }
+    input:checked + .dj-slider:before {
+      transform: translateX(16px);
+    }
+
     .hidden { display: none !important; }
   </style>
 </head>
@@ -995,8 +1015,42 @@
               </div>
             </div>
 
-            <!-- TAB 2: COLA COMPARTIDA -->
+            <!-- TAB 2: COLA COMPARTIDA CON DJ DECK -->
             <div id="tab-queue" class="tab-pane hidden">
+              <!-- DJ Deck Control Bar -->
+              <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--border-active); border-radius: var(--radius-md); padding: 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:12px; font-weight:800; color:var(--accent-color);">🎧 MODO DJ EPIC CROSSFADE</span>
+                    <label style="position:relative; display:inline-block; width:36px; height:20px; margin:0;" title="Activar mezcla automática al drop épico">
+                      <input type="checkbox" id="dj-mode-toggle" style="opacity:0; width:0; height:0;">
+                      <span class="dj-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background-color:#333; transition:.3s; border-radius:20px;"></span>
+                    </label>
+                  </div>
+
+                  <!-- Botón Hero Drop Mix Inmediato -->
+                  <button id="btn-trigger-dj-drop" style="background:linear-gradient(135deg, #FF7A00, #FF2E93); color:#fff; padding:6px 14px; font-size:12px; font-weight:800; box-shadow:0 0 15px rgba(255,122,0,0.5);" title="Cortar tema actual y saltar directamente a la parte épica de la siguiente canción">
+                    🚀 DROP MIX AHORA
+                  </button>
+                </div>
+
+                <!-- Subcontroles de Mix & DJ Sound FX -->
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-top:1px solid var(--border-subtle); padding-top:8px; font-size:11px;">
+                  <div style="display:flex; gap:6px; align-items:center;">
+                    <span style="color:var(--text-faint);">Mezcla:</span>
+                    <button id="btn-shuffle-queue" class="btn-secondary" style="padding:3px 8px; font-size:11px;" title="Reordenar la cola al azar">🔀 Shuffle</button>
+                    <button id="btn-smart-mix" class="btn-secondary" style="padding:3px 8px; font-size:11px;" title="Intercalar canciones equitativamente por usuario">🎧 Smart Mix</button>
+                  </div>
+
+                  <div style="display:flex; gap:6px; align-items:center;">
+                    <span style="color:var(--text-faint);">DJ FX:</span>
+                    <button class="btn-secondary dj-fx-btn" data-fx="airhorn" style="padding:3px 7px; font-size:11px;" title="Airhorn de DJ">📢 Horn</button>
+                    <button class="btn-secondary dj-fx-btn" data-fx="scratch" style="padding:3px 7px; font-size:11px;" title="Vinyl Scratch">💿 Scratch</button>
+                    <button class="btn-secondary dj-fx-btn" data-fx="riser" style="padding:3px 7px; font-size:11px;" title="Drop Riser">🚀 Riser</button>
+                  </div>
+                </div>
+              </div>
+
               <div class="queue-summary-bar">
                 <span id="queue-duration-text">0 canciones en espera</span>
                 <button id="btn-clear-queue" class="btn-danger" style="padding:2px 8px; font-size:11px;">Vaciar Cola</button>
@@ -1201,6 +1255,138 @@
       }
     }
 
+    // --- DJ EPIC CROSSFADE & SOUND EFFECTS ENGINE (WEB AUDIO API) ---
+    let djModeEnabled = false;
+    let djCrossfadeLock = false;
+
+    let webAudioCtx = null;
+    function getAudioCtx() {
+      if (!webAudioCtx) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) webAudioCtx = new AudioCtx();
+      }
+      if (webAudioCtx && webAudioCtx.state === 'suspended') {
+        webAudioCtx.resume();
+      }
+      return webAudioCtx;
+    }
+
+    // 📢 Airhorn DJ FX
+    function playAirhornFx() {
+      const ctx = getAudioCtx();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const freqs = [466.16, 466.16, 466.16, 370, 466.16];
+      const times = [0, 0.14, 0.28, 0.46, 0.60];
+      const durations = [0.11, 0.11, 0.11, 0.11, 0.38];
+
+      times.forEach((t, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(freqs[i], now + t);
+        osc.frequency.exponentialRampToValueAtTime(freqs[i] * 1.04, now + t + durations[i]);
+
+        gain.gain.setValueAtTime(0.25, now + t);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + t + durations[i]);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(now + t);
+        osc.stop(now + t + durations[i]);
+      });
+    }
+
+    // 💿 Vinyl Scratch FX
+    function playVinylScratchFx() {
+      const ctx = getAudioCtx();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const bufferSize = Math.floor(ctx.sampleRate * 0.32);
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const output = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        output[i] = (Math.random() * 2 - 1) * Math.sin(i / 10);
+      }
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(2600, now);
+      filter.frequency.exponentialRampToValueAtTime(150, now + 0.32);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.35, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.32);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+
+      noise.start(now);
+      noise.stop(now + 0.32);
+    }
+
+    // 🚀 Drop Riser FX
+    function playDropRiserFx() {
+      const ctx = getAudioCtx();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(120, now);
+      osc.frequency.exponentialRampToValueAtTime(1800, now + 0.8);
+
+      gain.gain.setValueAtTime(0.01, now);
+      gain.gain.linearRampToValueAtTime(0.25, now + 0.6);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.8);
+    }
+
+    function playSoundEffect(fxName) {
+      if (fxName === 'airhorn') playAirhornFx();
+      else if (fxName === 'scratch') playVinylScratchFx();
+      else if (fxName === 'riser') playDropRiserFx();
+      else if (fxName === 'drop_transition') {
+        playVinylScratchFx();
+        setTimeout(playAirhornFx, 160);
+      }
+    }
+
+    // --- SPOTIFY AUDIO ANALYSIS: DETECCIÓN DE DROP ÉPICO ---
+    async function getTrackEpicDropMs(trackId, durationMs) {
+      if (!trackId || !accessToken) {
+        return Math.min(65000, Math.round(durationMs * 0.28));
+      }
+      try {
+        const res = await fetch(`https://api.spotify.com/v1/audio-analysis/${trackId}`, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.sections && data.sections.length > 0) {
+            // Filtrar secciones entre 10s y el 75% del tema
+            const candidates = data.sections.filter(s => s.start >= 10 && s.start <= (durationMs / 1000) * 0.75);
+            if (candidates.length > 0) {
+              candidates.sort((a, b) => b.loudness - a.loudness);
+              const bestSection = candidates[0];
+              return Math.round(bestSection.start * 1000);
+            }
+          }
+        }
+      } catch (e) {}
+      return Math.min(65000, Math.round(durationMs * 0.28));
+    }
+
     function startUiTicker() {
       if (uiTickerInterval) clearInterval(uiTickerInterval);
       uiTickerInterval = setInterval(() => {
@@ -1214,11 +1400,19 @@
         document.getElementById('time-current').innerText = formatTime(pos);
         document.getElementById('time-total').innerText = formatTime(dur);
 
-        // Auto-next de ultra-precisión al terminar tema
+        // Auto-next o DJ Epic Crossfade al aproximarse al final
         if (localState.isPlaying && localState.durationMs > 0 && currentQueueLength > 0) {
           const remaining = localState.durationMs - pos;
-          if (remaining <= 600) {
-            socket.emit('track_ended');
+          if (djModeEnabled) {
+            if (remaining <= 3500 && !djCrossfadeLock) {
+              djCrossfadeLock = true;
+              setTimeout(() => { djCrossfadeLock = false; }, 5000);
+              socket.emit('trigger_dj_drop');
+            }
+          } else {
+            if (remaining <= 600) {
+              socket.emit('track_ended');
+            }
           }
         }
       }, 100);
@@ -1529,16 +1723,21 @@
           setTimeout(updateBanner, 400);
         });
 
-        // Añadir a la cola
-        item.querySelector('button:nth-child(2)').addEventListener('click', () => {
+        // Añadir a la cola con cálculo de Drop Épico
+        item.querySelector('button:nth-child(2)').addEventListener('click', async () => {
+          showToast(`Analizando tema y añadiendo a la cola...`);
+          const trackId = track.id || (track.uri ? track.uri.split(':')[2] : null);
+          const dropMs = await getTrackEpicDropMs(trackId, track.duration_ms);
+
           socket.emit('add_to_queue', {
             uri: track.uri,
             name: track.name,
             artist: artist,
             image: art,
-            duration_ms: track.duration_ms
+            duration_ms: track.duration_ms,
+            epicDropMs: dropMs
           });
-          showToast(`Añadido a la cola: ${track.name}`);
+          showToast(`Añadido a la cola: ${track.name} (Drop: ${formatTime(dropMs)})`);
         });
 
         searchResults.appendChild(item);
@@ -1567,6 +1766,7 @@
 
         const myUserKey = userProfile.username || userProfile.name;
         const isUpvoted = track.upvotedBy && track.upvotedBy.includes(myUserKey);
+        const dropPoint = track.epicDropMs || Math.round((track.duration_ms || 180000) * 0.28);
 
         item.innerHTML = `
           <div class="track-card-info">
@@ -1574,7 +1774,10 @@
             <img src="${track.image}" class="track-thumb" alt="Art">
             <div class="track-card-texts">
               <div class="track-card-title">${track.name}</div>
-              <div class="track-card-artist">por ${track.addedBy} • ${track.artist}</div>
+              <div class="track-card-artist" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                <span>por ${track.addedBy} • ${track.artist}</span>
+                <span class="pill" style="padding:0px 5px; font-size:9px; color:#f59e0b; border-color:rgba(245,158,11,0.3);" title="Momento de mayor impacto / Drop de la canción">🔥 Drop: ${formatTime(dropPoint)}</span>
+              </div>
             </div>
           </div>
           <div class="track-card-actions">
@@ -1606,6 +1809,48 @@
       if (confirm("¿Vaciar toda la cola de la sala?")) {
         socket.emit('clear_queue');
       }
+    });
+
+    // --- CONTROLES DE DJ DECK & SOUND EFFECTS ---
+    document.getElementById('dj-mode-toggle').addEventListener('change', (e) => {
+      djModeEnabled = e.target.checked;
+      showToast(`Modo DJ Epic Crossfade: ${djModeEnabled ? 'ACTIVADO 🔥' : 'DESACTIVADO'}`);
+    });
+
+    // Botón Hero Drop Mix Inmediato
+    document.getElementById('btn-trigger-dj-drop').addEventListener('click', () => {
+      if (currentQueueLength === 0) {
+        showToast("¡Agrega canciones a la cola para hacer Drop Mix!");
+        return;
+      }
+      playSoundEffect('drop_transition');
+      socket.emit('trigger_dj_drop');
+      showToast("🚀 ¡Lanzando DJ Drop Mix a la parte épica!");
+    });
+
+    // Shuffle & Smart Mix
+    document.getElementById('btn-shuffle-queue').addEventListener('click', () => {
+      socket.emit('shuffle_queue');
+      showToast("Mezclando canciones de la cola...");
+    });
+
+    document.getElementById('btn-smart-mix').addEventListener('click', () => {
+      socket.emit('smart_party_mix');
+      showToast("Aplicando Smart Party Mix (intercalado por usuario)...");
+    });
+
+    // Sound FX Board
+    document.querySelectorAll('.dj-fx-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const fx = btn.dataset.fx;
+        playSoundEffect(fx);
+        socket.emit('play_dj_fx', { fx });
+      });
+    });
+
+    // Escuchar efectos de sonido DJ emitidos por la sala
+    socket.on('dj_sound_effect', (data) => {
+      playSoundEffect(data.fx);
     });
 
     // --- REACCIONES FLOTANTES (CANVAS PARTICLES) ---
@@ -1938,6 +2183,13 @@
         localState.positionMs = compensatedPosition;
         localState.lastSyncTimestamp = Date.now();
         updateUiFromLocalState();
+
+        if (data.isEpicDrop) {
+          spawnFloatingEmoji('🔥');
+          spawnFloatingEmoji('🚀');
+          spawnFloatingEmoji('🎧');
+          spawnFloatingEmoji('💃');
+        }
 
         const body = {};
         if (data.trackUri) body.uris = [data.trackUri];

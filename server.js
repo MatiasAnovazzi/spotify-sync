@@ -32,7 +32,7 @@ function emitRoomQueue(roomId) {
   io.to(roomId).emit('room_queue_update', queue);
 }
 
-function playNextInQueue(roomId, triggeredByUser = 'Sistema') {
+function playNextInQueue(roomId, triggeredByUser = 'Sistema', forceDrop = false) {
   if (!roomQueues[roomId] || roomQueues[roomId].length === 0) return;
 
   // Evitar saltos duplicados si varios clientes reportan fin al mismo segundo
@@ -43,19 +43,24 @@ function playNextInQueue(roomId, triggeredByUser = 'Sistema') {
   const nextTrack = roomQueues[roomId].shift();
   emitRoomQueue(roomId);
 
+  const targetPositionMs = (forceDrop && nextTrack.epicDropMs) ? nextTrack.epicDropMs : 0;
   const now = Date.now();
   const payload = {
     action: 'play',
-    actionLabel: `reprodujo siguiente de la cola: 🎵 <b>${nextTrack.name}</b>`,
+    actionLabel: forceDrop 
+      ? `hizo un 🚀 <b>DJ DROP MIX</b> al momento épico de: 🎵 <b>${nextTrack.name}</b>`
+      : `reprodujo siguiente de la cola: 🎵 <b>${nextTrack.name}</b>`,
     trackUri: nextTrack.uri,
     trackInfo: {
       name: nextTrack.name,
       artist: nextTrack.artist,
       image: nextTrack.image,
-      duration_ms: nextTrack.duration_ms
+      duration_ms: nextTrack.duration_ms,
+      epicDropMs: nextTrack.epicDropMs || 0
     },
-    positionMs: 0,
+    positionMs: targetPositionMs,
     serverTimestamp: now,
+    isEpicDrop: forceDrop,
     user: triggeredByUser,
     time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   };
@@ -65,12 +70,16 @@ function playNextInQueue(roomId, triggeredByUser = 'Sistema') {
     isPlaying: true,
     trackUri: nextTrack.uri,
     trackInfo: payload.trackInfo,
-    positionMs: 0,
+    positionMs: targetPositionMs,
     serverTimestamp: now
   };
 
   io.to(roomId).emit('apply_action', payload);
   io.to(roomId).emit('log_action', payload);
+
+  if (forceDrop) {
+    io.to(roomId).emit('dj_sound_effect', { fx: 'drop_transition' });
+  }
 }
 
 io.on('connection', (socket) => {
@@ -208,6 +217,7 @@ io.on('connection', (socket) => {
         artist: track.artist,
         image: track.image,
         duration_ms: track.duration_ms,
+        epicDropMs: track.epicDropMs || 0,
         addedBy: socket.userData ? socket.userData.name : 'Alguien',
         upvotes: 0,
         upvotedBy: []
@@ -219,6 +229,70 @@ io.on('connection', (socket) => {
       io.to(socket.roomId).emit('log_action', {
         user: socket.userData ? socket.userData.name : 'Alguien',
         actionLabel: `añadió a la cola: 🎵 <b>${track.name}</b>`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+    }
+  });
+
+  // Disparar DJ Drop Mix a la parte épica de la siguiente canción
+  socket.on('trigger_dj_drop', () => {
+    if (socket.roomId && socket.userData) {
+      playNextInQueue(socket.roomId, socket.userData.name, true);
+    }
+  });
+
+  // Efecto de sonido DJ
+  socket.on('play_dj_fx', (data) => {
+    if (socket.roomId) {
+      io.to(socket.roomId).emit('dj_sound_effect', { fx: (data && data.fx) || 'airhorn' });
+    }
+  });
+
+  // Mezclar la cola aleatoriamente (Shuffle Queue)
+  socket.on('shuffle_queue', () => {
+    if (socket.roomId && roomQueues[socket.roomId] && roomQueues[socket.roomId].length > 1) {
+      const q = roomQueues[socket.roomId];
+      for (let i = q.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [q[i], q[j]] = [q[j], q[i]];
+      }
+      emitRoomQueue(socket.roomId);
+      io.to(socket.roomId).emit('log_action', {
+        user: socket.userData ? socket.userData.name : 'Alguien',
+        actionLabel: '🔀 mezcló aleatoriamente la cola de canciones',
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+    }
+  });
+
+  // Smart Party Mix (Intercalado equitativo de canciones por usuario)
+  socket.on('smart_party_mix', () => {
+    if (socket.roomId && roomQueues[socket.roomId] && roomQueues[socket.roomId].length > 1) {
+      const q = roomQueues[socket.roomId];
+      const byUser = {};
+      q.forEach(item => {
+        const user = item.addedBy || 'Anónimo';
+        if (!byUser[user]) byUser[user] = [];
+        byUser[user].push(item);
+      });
+
+      const userKeys = Object.keys(byUser);
+      const mixedQueue = [];
+      let maxLen = Math.max(...userKeys.map(k => byUser[k].length));
+
+      for (let i = 0; i < maxLen; i++) {
+        userKeys.forEach(user => {
+          if (byUser[user][i]) {
+            mixedQueue.push(byUser[user][i]);
+          }
+        });
+      }
+
+      roomQueues[socket.roomId] = mixedQueue;
+      emitRoomQueue(socket.roomId);
+      io.to(socket.roomId).emit('log_action', {
+        user: socket.userData ? socket.userData.name : 'Alguien',
+        actionLabel: '🎧 activó el <b>Smart Party Mix</b> (intercalado equitativo de canciones)',
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
       });
     }
