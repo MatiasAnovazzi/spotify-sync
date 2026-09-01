@@ -381,7 +381,10 @@
     <!-- Paso 3: Dashboard Principal -->
     <div id="player-section" class="hidden">
       <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #71767B;">
-        <span>SALA: <b id="current-room-text" style="color: var(--accent-color);"></b></span>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span>SALA: <b id="current-room-text" style="color: var(--accent-color);"></b></span>
+          <span id="ping-indicator" class="badge" style="color: var(--accent-color); border-color: rgba(255,255,255,0.15); font-size: 10px;" title="Latencia en tiempo real con la sala">⚡ --ms</span>
+        </div>
         <button id="btn-logout" class="btn-secondary">Cerrar Sesión</button>
       </div>
 
@@ -481,13 +484,99 @@
     const savedTheme = localStorage.getItem('selected_theme') || 'green';
     applyTheme(savedTheme);
 
-    const socket = io();
+    const socket = io({
+      transports: ['websocket', 'polling']
+    });
     let accessToken = null;
     let pollInterval = null;
+    let uiTickerInterval = null;
     let userProfile = {};
     let searchTimeout = null;
     let currentQueueLength = 0;
-    let lastTrackUri = null;
+
+    // --- NTP CLOCK SYNC & LATENCY MEASUREMENT ---
+    let serverOffsetMs = 0;
+    let currentRttMs = 0;
+
+    function pingServer() {
+      if (socket.connected) {
+        socket.emit('sync_ping', Date.now());
+      }
+    }
+
+    socket.on('sync_pong', ({ clientTime, serverTime }) => {
+      const now = Date.now();
+      currentRttMs = Math.max(0, now - clientTime);
+      serverOffsetMs = (serverTime + currentRttMs / 2) - now;
+      
+      const pingBadge = document.getElementById('ping-indicator');
+      if (pingBadge) {
+        pingBadge.innerText = `⚡ ${currentRttMs}ms`;
+        if (currentRttMs < 60) {
+          pingBadge.style.color = 'var(--accent-color)';
+        } else if (currentRttMs < 150) {
+          pingBadge.style.color = '#F59E0B';
+        } else {
+          pingBadge.style.color = '#EF4444';
+        }
+      }
+    });
+
+    socket.on('connect', pingServer);
+    setInterval(pingServer, 10000);
+
+    // --- LOCAL PLAYBACK STATE & INTERPOLATION ENGINE ---
+    const localState = {
+      isPlaying: false,
+      trackUri: null,
+      name: 'Sin reproducción activa',
+      artist: 'Abre Spotify en tu dispositivo',
+      image: '',
+      durationMs: 0,
+      positionMs: 0,
+      lastSyncTimestamp: Date.now()
+    };
+
+    function getEstimatedPositionMs() {
+      if (!localState.isPlaying) return localState.positionMs;
+      const elapsed = Date.now() - localState.lastSyncTimestamp;
+      const estimated = localState.positionMs + elapsed;
+      return localState.durationMs > 0 ? Math.min(localState.durationMs, estimated) : estimated;
+    }
+
+    function updateUiFromLocalState() {
+      trackTitle.innerText = localState.name || "Sin reproducción activa";
+      trackArtist.innerText = localState.artist || "Abre Spotify en tu dispositivo";
+      if (localState.image) {
+        trackImg.src = localState.image;
+        trackImg.style.display = 'block';
+      } else {
+        trackImg.style.display = 'none';
+      }
+    }
+
+    function startUiTicker() {
+      if (uiTickerInterval) clearInterval(uiTickerInterval);
+      uiTickerInterval = setInterval(() => {
+        if (!localState.trackUri && !localState.durationMs) return;
+
+        const pos = getEstimatedPositionMs();
+        const dur = localState.durationMs || 1;
+        const percent = Math.min(100, Math.max(0, (pos / dur) * 100));
+
+        progressFill.style.width = `${percent}%`;
+        timeCurrent.innerText = formatTime(pos);
+        timeTotal.innerText = formatTime(dur);
+
+        // Auto-next de ultra-precisión cuando faltan menos de 600ms para finalizar
+        if (localState.isPlaying && localState.durationMs > 0 && currentQueueLength > 0) {
+          const remaining = localState.durationMs - pos;
+          if (remaining <= 600) {
+            socket.emit('track_ended');
+          }
+        }
+      }, 100);
+    }
 
     // DOM Elements
     const loginSec = document.getElementById('login-section');
@@ -629,13 +718,15 @@
       roomSec.classList.add('hidden');
       playerSec.classList.remove('hidden');
 
+      pingServer();
+      startUiTicker();
       updateBanner();
       if (!pollInterval) {
-        pollInterval = setInterval(updateBanner, 1000);
+        pollInterval = setInterval(updateBanner, 2500);
       }
     });
 
-    // --- BUSCADOR ---
+    // --- BUSCADOR CON DESPACHO INMEDIATO ---
     searchInput.addEventListener('input', () => {
       clearTimeout(searchTimeout);
       const query = searchInput.value.trim();
@@ -657,7 +748,7 @@
         } catch (e) {
           console.error("Error buscando:", e);
         }
-      }, 350);
+      }, 300);
     });
 
     function renderSearchResults(tracks) {
@@ -688,18 +779,40 @@
           </div>
         `;
 
-        item.querySelector('button:nth-child(1)').addEventListener('click', async () => {
+        item.querySelector('button:nth-child(1)').addEventListener('click', () => {
           const payload = {
             action: 'play',
             actionLabel: `puso a sonar: 🎵 <b>${track.name}</b>`,
             trackUri: track.uri,
+            trackInfo: {
+              name: track.name,
+              artist: artist,
+              image: art,
+              duration_ms: track.duration_ms
+            },
             positionMs: 0
           };
-          await spotifyApiCall('/play', 'PUT', { uris: [track.uri], position_ms: 0 });
+
+          // 1. Emitir inmediatamente por socket (0ms delay)
           socket.emit('sync_action', payload);
+
+          // 2. Actualizar estado local
+          localState.isPlaying = true;
+          localState.trackUri = track.uri;
+          localState.name = track.name;
+          localState.artist = artist;
+          localState.image = art;
+          localState.durationMs = track.duration_ms;
+          localState.positionMs = 0;
+          localState.lastSyncTimestamp = Date.now();
+          updateUiFromLocalState();
+
           searchResults.innerHTML = '';
           searchInput.value = '';
-          setTimeout(updateBanner, 300);
+
+          // 3. Ejecutar llamada local a Spotify concurrentemente
+          spotifyApiCall('/play', 'PUT', { uris: [track.uri], position_ms: 0 });
+          setTimeout(updateBanner, 400);
         });
 
         item.querySelector('button:nth-child(2)').addEventListener('click', () => {
@@ -853,13 +966,13 @@
     }
 
     function formatTime(ms) {
-      const totalSec = Math.floor(ms / 1000);
+      const totalSec = Math.floor(Math.max(0, ms) / 1000);
       const min = Math.floor(totalSec / 60);
       const sec = totalSec % 60;
       return `${min}:${sec < 10 ? '0' : ''}${sec}`;
     }
 
-    // --- ACTUALIZACIÓN DE ESTADO Y AUTO-NEXT ---
+    // --- MONITOREO DE DISPOSITIVO Y CORRECCIÓN DE DERIVA ---
     async function updateBanner() {
       try {
         const res = await spotifyApiCall('');
@@ -867,67 +980,94 @@
 
         const data = await res.json();
         if (data && data.item) {
-          trackTitle.innerText = data.item.name;
-          trackArtist.innerText = data.item.artists.map(a => a.name).join(', ');
-          
+          localState.trackUri = data.item.uri;
+          localState.name = data.item.name;
+          localState.artist = data.item.artists.map(a => a.name).join(', ');
+          localState.durationMs = data.item.duration_ms || 0;
           if (data.item.album.images && data.item.album.images.length > 0) {
-            trackImg.src = data.item.album.images[0].url;
-            trackImg.style.display = 'block';
+            localState.image = data.item.album.images[0].url;
           }
 
-          const currentMs = data.progress_ms || 0;
-          const totalMs = data.item.duration_ms || 1;
-          const percent = (currentMs / totalMs) * 100;
+          const actualPos = data.progress_ms || 0;
+          const estimatedPos = getEstimatedPositionMs();
+          const drift = Math.abs(actualPos - estimatedPos);
 
-          progressFill.style.width = `${percent}%`;
-          timeCurrent.innerText = formatTime(currentMs);
-          timeTotal.innerText = formatTime(totalMs);
-
-          // AUTO-NEXT: si faltan menos de 1.5s para que termine y hay cola
-          if (data.is_playing && (totalMs - currentMs <= 1500) && currentQueueLength > 0) {
-            socket.emit('track_ended');
+          // Si el desfase acumulado supera 1200ms o el estado de reproducción no coincide
+          if (drift > 1200 || localState.isPlaying !== data.is_playing) {
+            localState.isPlaying = data.is_playing;
+            localState.positionMs = actualPos;
+            localState.lastSyncTimestamp = Date.now();
           }
+
+          updateUiFromLocalState();
         }
       } catch (err) {}
     }
 
-    // --- ACCIONES LOCALES ---
-    document.getElementById('btn-play').addEventListener('click', async () => {
-      const res = await spotifyApiCall('');
-      let payload = { action: 'play', actionLabel: 'dio ▶ Play' };
+    // --- ACCIONES LOCALES (ZERO-WAIT CONCURRENT DISPATCH) ---
+    document.getElementById('btn-play').addEventListener('click', () => {
+      const currentPos = getEstimatedPositionMs();
+      const payload = {
+        action: 'play',
+        actionLabel: 'dio ▶ Play',
+        trackUri: localState.trackUri,
+        trackInfo: {
+          name: localState.name,
+          artist: localState.artist,
+          image: localState.image,
+          duration_ms: localState.durationMs
+        },
+        positionMs: currentPos
+      };
 
-      if (res && res.status === 200) {
-        const state = await res.json();
-        if (state && state.item) {
-          payload.trackUri = state.item.uri;
-          payload.positionMs = state.progress_ms;
-        }
-      }
-
-      await spotifyApiCall('/play', 'PUT', payload.trackUri ? { uris: [payload.trackUri], position_ms: payload.positionMs } : null);
+      // 1. Emitir inmediatamente por socket
       socket.emit('sync_action', payload);
-      setTimeout(updateBanner, 300);
+
+      // 2. Actualización optimista local
+      localState.isPlaying = true;
+      localState.positionMs = currentPos;
+      localState.lastSyncTimestamp = Date.now();
+      updateUiFromLocalState();
+
+      // 3. Llamada concurrente a Spotify
+      spotifyApiCall('/play', 'PUT', payload.trackUri ? { uris: [payload.trackUri], position_ms: Math.round(currentPos) } : null);
+      setTimeout(updateBanner, 400);
     });
 
-    document.getElementById('btn-pause').addEventListener('click', async () => {
-      await spotifyApiCall('/pause', 'PUT');
-      socket.emit('sync_action', { action: 'pause', actionLabel: 'puso ⏸ Pausa' });
-      setTimeout(updateBanner, 300);
+    document.getElementById('btn-pause').addEventListener('click', () => {
+      const currentPos = getEstimatedPositionMs();
+      const payload = {
+        action: 'pause',
+        actionLabel: 'puso ⏸ Pausa',
+        positionMs: currentPos
+      };
+
+      // 1. Emitir inmediatamente por socket
+      socket.emit('sync_action', payload);
+
+      // 2. Actualización optimista local
+      localState.isPlaying = false;
+      localState.positionMs = currentPos;
+      localState.lastSyncTimestamp = Date.now();
+      updateUiFromLocalState();
+
+      // 3. Llamada concurrente a Spotify
+      spotifyApiCall('/pause', 'PUT');
+      setTimeout(updateBanner, 400);
     });
 
-    document.getElementById('btn-next').addEventListener('click', async () => {
-      // Si hay elementos en la cola compartida, el servidor la procesará
+    document.getElementById('btn-next').addEventListener('click', () => {
       socket.emit('sync_action', { action: 'next', actionLabel: 'pasó a la ⏭ siguiente canción' });
       if (currentQueueLength === 0) {
-        await spotifyApiCall('/next', 'POST');
+        spotifyApiCall('/next', 'POST');
       }
-      setTimeout(updateBanner, 500);
+      setTimeout(updateBanner, 400);
     });
 
-    document.getElementById('btn-prev').addEventListener('click', async () => {
-      await spotifyApiCall('/previous', 'POST');
+    document.getElementById('btn-prev').addEventListener('click', () => {
       socket.emit('sync_action', { action: 'previous', actionLabel: 'volvió a la ⏮ canción anterior' });
-      setTimeout(updateBanner, 500);
+      spotifyApiCall('/previous', 'POST');
+      setTimeout(updateBanner, 400);
     });
 
     // --- LOGOUT ---
@@ -936,6 +1076,7 @@
       localStorage.removeItem('code_verifier');
       
       if (pollInterval) clearInterval(pollInterval);
+      if (uiTickerInterval) clearInterval(uiTickerInterval);
 
       socket.disconnect();
       socket.connect();
@@ -952,13 +1093,18 @@
       trackTitle.innerText = "Sin reproducción activa";
       trackArtist.innerText = "Abre Spotify en tu dispositivo";
 
+      localState.isPlaying = false;
+      localState.trackUri = null;
+      localState.durationMs = 0;
+      localState.positionMs = 0;
+
       playerSec.classList.add('hidden');
       roomSec.classList.add('hidden');
       loginSec.classList.remove('hidden');
       statusText.innerText = "Sesión cerrada.";
     });
 
-    // --- EVENTOS SOCKET.IO ---
+    // --- EVENTOS SOCKET.IO CON COMPENSACIÓN DE LATENCIA ---
     socket.on('room_users_update', (users) => {
       renderRoomUsers(users);
     });
@@ -979,14 +1125,45 @@
       addLog(`<span class="log-time">[${data.time}]</span> <b>${data.user}</b> ${data.actionLabel}`);
     });
 
+    const ESTIMATED_SPOTIFY_LATENCY_MS = 100; // Compensación por retraso de ejecución en Spotify Connect
+
     socket.on('apply_action', async (data) => {
+      const nowServer = Date.now() + serverOffsetMs;
+      const latencyElapsed = data.serverTimestamp ? Math.max(0, nowServer - data.serverTimestamp) : 0;
+
       if (data.action === 'play') {
+        const basePosition = typeof data.positionMs === 'number' ? data.positionMs : 0;
+        let compensatedPosition = basePosition + latencyElapsed + ESTIMATED_SPOTIFY_LATENCY_MS;
+
+        localState.isPlaying = true;
+        if (data.trackUri) localState.trackUri = data.trackUri;
+        if (data.trackInfo) {
+          if (data.trackInfo.name) localState.name = data.trackInfo.name;
+          if (data.trackInfo.artist) localState.artist = data.trackInfo.artist;
+          if (data.trackInfo.image) localState.image = data.trackInfo.image;
+          if (data.trackInfo.duration_ms) {
+            localState.durationMs = data.trackInfo.duration_ms;
+            compensatedPosition = Math.min(compensatedPosition, localState.durationMs);
+          }
+        }
+        localState.positionMs = compensatedPosition;
+        localState.lastSyncTimestamp = Date.now();
+        updateUiFromLocalState();
+
         const body = {};
         if (data.trackUri) body.uris = [data.trackUri];
-        if (typeof data.positionMs === 'number') body.position_ms = data.positionMs;
-        await spotifyApiCall('/play', 'PUT', Object.keys(body).length ? body : null);
+        body.position_ms = Math.round(compensatedPosition);
+
+        await spotifyApiCall('/play', 'PUT', body);
       } 
       else if (data.action === 'pause') {
+        localState.isPlaying = false;
+        if (typeof data.positionMs === 'number') {
+          localState.positionMs = data.positionMs;
+        }
+        localState.lastSyncTimestamp = Date.now();
+        updateUiFromLocalState();
+
         await spotifyApiCall('/pause', 'PUT');
       } 
       else if (data.action === 'next') {
@@ -995,6 +1172,7 @@
       else if (data.action === 'previous') {
         await spotifyApiCall('/previous', 'POST');
       }
+
       setTimeout(updateBanner, 400);
     });
   </script>

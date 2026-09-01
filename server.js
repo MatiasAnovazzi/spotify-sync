@@ -5,12 +5,21 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+
+// Configuración de Socket.IO optimizada para latencia ultra-baja
+const io = new Server(server, {
+  transports: ['websocket', 'polling'], // Priorizar WebSocket directo
+  pingInterval: 10000,
+  pingTimeout: 5000,
+  perMessageDeflate: false, // Desactivar compresión para evitar buffering en mensajes pequeños
+  httpCompression: false
+});
 
 app.use(express.static(path.join(__dirname, 'public')));
 
 const roomUsers = {};
 const roomQueues = {}; 
+const roomPlaybackState = {}; // roomId -> { isPlaying, trackUri, trackInfo, positionMs, serverTimestamp }
 const roomTransitionLock = {}; // Bloqueo para evitar múltiples triggers simultáneos
 
 function emitRoomUsers(roomId) {
@@ -29,18 +38,35 @@ function playNextInQueue(roomId, triggeredByUser = 'Sistema') {
   // Evitar saltos duplicados si varios clientes reportan fin al mismo segundo
   if (roomTransitionLock[roomId]) return;
   roomTransitionLock[roomId] = true;
-  setTimeout(() => { roomTransitionLock[roomId] = false; }, 3000);
+  setTimeout(() => { roomTransitionLock[roomId] = false; }, 2500);
 
   const nextTrack = roomQueues[roomId].shift();
   emitRoomQueue(roomId);
 
+  const now = Date.now();
   const payload = {
     action: 'play',
     actionLabel: `reprodujo siguiente de la cola: 🎵 <b>${nextTrack.name}</b>`,
     trackUri: nextTrack.uri,
+    trackInfo: {
+      name: nextTrack.name,
+      artist: nextTrack.artist,
+      image: nextTrack.image,
+      duration_ms: nextTrack.duration_ms
+    },
     positionMs: 0,
+    serverTimestamp: now,
     user: triggeredByUser,
     time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  };
+
+  roomPlaybackState[roomId] = {
+    action: 'play',
+    isPlaying: true,
+    trackUri: nextTrack.uri,
+    trackInfo: payload.trackInfo,
+    positionMs: 0,
+    serverTimestamp: now
   };
 
   io.to(roomId).emit('apply_action', payload);
@@ -48,6 +74,14 @@ function playNextInQueue(roomId, triggeredByUser = 'Sistema') {
 }
 
 io.on('connection', (socket) => {
+  // Sincronización de reloj estilo NTP ultra-rápida
+  socket.on('sync_ping', (clientTime) => {
+    socket.emit('sync_pong', {
+      clientTime,
+      serverTime: Date.now()
+    });
+  });
+
   socket.on('join_room', ({ roomId, profile }) => {
     socket.join(roomId);
     socket.roomId = roomId;
@@ -75,6 +109,57 @@ io.on('connection', (socket) => {
 
     emitRoomUsers(roomId);
     emitRoomQueue(roomId);
+
+    // Si la sala ya tiene reproducción activa, sincronizar al nuevo usuario inmediatamente
+    if (roomPlaybackState[roomId]) {
+      const state = roomPlaybackState[roomId];
+      let currentPosition = state.positionMs || 0;
+      if (state.isPlaying) {
+        currentPosition += (Date.now() - state.serverTimestamp);
+        if (state.trackInfo && state.trackInfo.duration_ms) {
+          currentPosition = Math.min(currentPosition, state.trackInfo.duration_ms);
+        }
+      }
+
+      socket.emit('apply_action', {
+        action: state.isPlaying ? 'play' : 'pause',
+        actionLabel: 'Sincronización inicial con la sala',
+        trackUri: state.trackUri,
+        trackInfo: state.trackInfo,
+        positionMs: Math.round(currentPosition),
+        serverTimestamp: Date.now(),
+        user: 'Sistema',
+        isInitialSync: true,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+    }
+  });
+
+  // Solicitud manual o por deriva de resincronización de sala
+  socket.on('request_sync', () => {
+    const roomId = socket.roomId;
+    if (roomId && roomPlaybackState[roomId]) {
+      const state = roomPlaybackState[roomId];
+      let currentPosition = state.positionMs || 0;
+      if (state.isPlaying) {
+        currentPosition += (Date.now() - state.serverTimestamp);
+        if (state.trackInfo && state.trackInfo.duration_ms) {
+          currentPosition = Math.min(currentPosition, state.trackInfo.duration_ms);
+        }
+      }
+
+      socket.emit('apply_action', {
+        action: state.isPlaying ? 'play' : 'pause',
+        actionLabel: 'Resincronización de sala',
+        trackUri: state.trackUri,
+        trackInfo: state.trackInfo,
+        positionMs: Math.round(currentPosition),
+        serverTimestamp: Date.now(),
+        user: 'Sistema',
+        isInitialSync: true,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+    }
   });
 
   // Agregar canción a la cola
@@ -118,13 +203,30 @@ io.on('connection', (socket) => {
         const [selectedTrack] = roomQueues[socket.roomId].splice(index, 1);
         emitRoomQueue(socket.roomId);
 
+        const now = Date.now();
         const payload = {
           action: 'play',
           actionLabel: `reprodujo desde la cola: 🎵 <b>${selectedTrack.name}</b>`,
           trackUri: selectedTrack.uri,
+          trackInfo: {
+            name: selectedTrack.name,
+            artist: selectedTrack.artist,
+            image: selectedTrack.image,
+            duration_ms: selectedTrack.duration_ms
+          },
           positionMs: 0,
+          serverTimestamp: now,
           user: socket.userData ? socket.userData.name : 'Alguien',
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        };
+
+        roomPlaybackState[socket.roomId] = {
+          action: 'play',
+          isPlaying: true,
+          trackUri: selectedTrack.uri,
+          trackInfo: payload.trackInfo,
+          positionMs: 0,
+          serverTimestamp: now
         };
 
         io.to(socket.roomId).emit('apply_action', payload);
@@ -165,11 +267,36 @@ io.on('connection', (socket) => {
         return;
       }
 
+      const now = Date.now();
       const payload = {
         ...data,
+        serverTimestamp: now,
         user: socket.userData.name,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
       };
+
+      // Actualizar estado de sala en el servidor
+      if (data.action === 'play') {
+        roomPlaybackState[socket.roomId] = {
+          action: 'play',
+          isPlaying: true,
+          trackUri: data.trackUri || (roomPlaybackState[socket.roomId] && roomPlaybackState[socket.roomId].trackUri),
+          trackInfo: data.trackInfo || (roomPlaybackState[socket.roomId] && roomPlaybackState[socket.roomId].trackInfo),
+          positionMs: typeof data.positionMs === 'number' ? data.positionMs : 0,
+          serverTimestamp: now
+        };
+      } else if (data.action === 'pause') {
+        const currentPos = typeof data.positionMs === 'number' 
+          ? data.positionMs 
+          : (roomPlaybackState[socket.roomId] ? roomPlaybackState[socket.roomId].positionMs : 0);
+        roomPlaybackState[socket.roomId] = {
+          ...(roomPlaybackState[socket.roomId] || {}),
+          action: 'pause',
+          isPlaying: false,
+          positionMs: currentPos,
+          serverTimestamp: now
+        };
+      }
       
       socket.to(socket.roomId).emit('apply_action', payload);
       io.to(socket.roomId).emit('log_action', payload);
@@ -193,6 +320,7 @@ io.on('connection', (socket) => {
       if (roomUsers[roomId].length === 0) {
         delete roomUsers[roomId];
         delete roomQueues[roomId];
+        delete roomPlaybackState[roomId];
         delete roomTransitionLock[roomId];
       }
     }
